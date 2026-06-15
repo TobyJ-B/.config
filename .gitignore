@@ -1,0 +1,20 @@
+#ignore everything
+*
+
+!*/
+
+!README.md
+
+!.gitignore
+
+#nvim
+!nvim/
+!nvim/**
+
+#tmux
+!tmux/
+!tmux/**
+
+#Scripts
+!Scripts/
+!Scripts/**
