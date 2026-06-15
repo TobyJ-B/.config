@@ -1,0 +1,14 @@
+#! /usr/bin/bash
+
+#SCP File Download Script
+
+#File Paths
+
+read -p "Enter server file/Directory path: " server_Path
+read -p "Enter Local Download Destination: " local_Path
+
+scp -r -P sshserver:"$server_Path" "$local_Path"
+
+echo "Download complete"
+
+
