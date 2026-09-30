@@ -15,7 +15,7 @@ else
     fd --type d --max-depth 1 . "${DIRS[@]}" \
       | sed "s|^$HOME/||" \
       | sort -u \
-      | sk
+      | fzf
   )
 
   [[ -n "$selected" ]] || exit 0

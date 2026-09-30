@@ -15,6 +15,13 @@
 !tmux/
 !tmux/**
 
-#Scripts
-!Scripts/
-!Scripts/**
+#scripts
+!scripts/
+!scripts/**
+
+#fastfetch
+!fastfetch/
+!fastfetch/**
+
+#never upload backups
+*.bak

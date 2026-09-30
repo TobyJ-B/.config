@@ -36,6 +36,7 @@ vim.pack.add({
 	{ src = "https://github.com/rafamadriz/friendly-snippets" },
 	{ src = "https://github.com/MeanderingProgrammer/render-markdown.nvim" },
 	{ src = "https://github.com/HakonHarnes/img-clip.nvim" },
+	{ src = "https://github.com/chomosuke/typst-preview.nvim" },
 })
 
 require('mason').setup()
@@ -44,13 +45,14 @@ require('oil').setup()
 require('nvim-autopairs').setup()
 require('nvim-tree').setup()
 require("nvim-treesitter.configs").setup({
-	ensure_installed = { "lua", "python", "cpp", "java", "markdown", "markdown_inline", "yaml", "html", "vim", "vimdoc" },
+	ensure_installed = { "lua", "python", "cpp", "java", "markdown", "markdown_inline", "yaml", "html", "vim", "vimdoc", "typst" },
 	auto_install = true,
 	highlight = { enable = true },
 	indent = { enable = true },
 })
 
 require('render-markdown').setup({})
+require('typst-preview').setup({})
 require('img-clip').setup({
   default = { dir_path = "assets", relative_to_current_file = true },
 })
@@ -72,13 +74,16 @@ vim.cmd("colorscheme kanagawa-dragon")
 --)
 
 local capabilities = require('cmp_nvim_lsp').default_capabilities()
-local lspconfig = require('lspconfig')
-
-local servers = { "pyright", "lua_ls", "jdtls", "clangd", "texlab" }
+local servers = { "pyright", "lua_ls", "jdtls", "clangd", "texlab", "tinymist", "marksman", "harper_ls" }
 
 for _, lsp in ipairs(servers) do
-	lspconfig[lsp].setup({ capabilities = capabilities })
+	vim.lsp.config(lsp, { capabilities = capabilities })
 end
+vim.lsp.enable(servers)
+
+vim.lsp.config("tinymist", {
+	settings = { exportPdf = "onType", formatterMode = "typstyle" },
+})
 
 
 local term = require("nvterm.terminal")
@@ -129,6 +134,7 @@ local cmp = require('cmp')
 local luasnip = require('luasnip')
 
 require('luasnip.loaders.from_vscode').lazy_load()
+require('luasnip.loaders.from_lua').lazy_load({ paths = { vim.fn.stdpath('config') .. '/snippets' } })
 
 cmp.setup({
   snippet = {
@@ -188,11 +194,72 @@ map('n', '<leader>n', function()
   MiniPick.builtin.files(nil, { source = { cwd = vim.fn.expand('~/notes') } })
 end, opts)
 map('n', '<leader>p', ':PasteImage<CR>', opts)
+map('n', '<leader>m', '<Cmd>RenderMarkdown toggle<CR>', opts)
+-- zathura preview that follows whichever .typ file you're in
+local zathura_pid = nil
+
+local function typst_pdf(file)
+	local pdf = vim.fn.fnamemodify(file, ':r') .. '.pdf'
+	if vim.fn.filereadable(pdf) == 0 then
+		vim.fn.system({ 'tinymist', 'compile', file, pdf })
+	end
+	return pdf
+end
+
+map('n', '<leader>tp', function()
+	vim.cmd('write')
+	local pdf = typst_pdf(vim.fn.expand('%:p'))
+	local job = vim.fn.jobstart({ 'zathura', pdf }, {
+		detach = true,
+		on_exit = function() zathura_pid = nil end,
+	})
+	zathura_pid = vim.fn.jobpid(job)
+end, opts)
+
+vim.api.nvim_create_autocmd('BufEnter', {
+	pattern = '*.typ',
+	callback = function(ev)
+		if not zathura_pid then return end
+		local pdf = typst_pdf(vim.api.nvim_buf_get_name(ev.buf))
+		-- zathura grabs focus when it opens a document, so hand it back to nvim's window
+		local nvim_win = vim.trim(vim.fn.system({ 'bspc', 'query', '-N', '-n', 'focused' }))
+		vim.system({ 'dbus-send', '--session', '--print-reply', '--dest=org.pwmt.zathura.PID-' .. zathura_pid,
+			'/org/pwmt/zathura', 'org.pwmt.zathura.OpenDocument', 'string:' .. pdf, 'string:', 'int32:0' },
+			{}, function()
+				vim.schedule(function()
+					vim.defer_fn(function() vim.system({ 'bspc', 'node', nvim_win, '-f' }) end, 150)
+				end)
+			end)
+	end,
+})
+-- run a command in the horizontal nvterm split and jump into it (so input works)
+local function run_in_term(cmd)
+	local function horizontal()
+		local found
+		for _, t in ipairs(term.list_terms() or {}) do
+			if t.type == 'horizontal' and vim.api.nvim_buf_is_valid(t.buf) then found = t end
+		end
+		return found
+	end
+	local t = horizontal()
+	if t and not vim.api.nvim_win_is_valid(t.win) then term.toggle('horizontal') end
+	term.send(cmd, 'horizontal')
+	t = horizontal()
+	if t and vim.api.nvim_win_is_valid(t.win) then
+		vim.api.nvim_set_current_win(t.win)
+		vim.schedule(function() vim.cmd('startinsert') end)
+	end
+end
+
 map('n', '<leader>r', function()
 	vim.cmd('write')
-	local src = vim.fn.expand('%:p')
-	local bin = vim.fn.expand('%:p:r')
-	vim.cmd('!g++ -std=c++20 -O2 ' .. vim.fn.shellescape(src)
-		.. ' -o ' .. vim.fn.shellescape(bin)
-		.. ' && ' .. vim.fn.shellescape(bin))
+	local src = vim.fn.shellescape(vim.fn.expand('%:p'))
+	if vim.bo.filetype == 'java' then
+		run_in_term('java ' .. src)
+		return
+	end
+	local bin = vim.fn.shellescape(vim.fn.expand('%:p:r'))
+	run_in_term('g++ -std=c++20 -O2 ' .. src .. ' -o ' .. bin .. ' && ' .. bin)
 end)
+-- jump from the terminal back to the code above it
+map('t', '<C-k>', '<Cmd>wincmd k<CR>', opts)
